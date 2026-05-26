@@ -6,7 +6,7 @@ import plotly.express as px
 
 # ⚠️ VERY IMPORTANT: Replace this with your actual Web API Key from Firebase!
 # KEEP THE QUOTATION MARKS! Example: "AIzaSy..."
-FIREBASE_WEB_API_KEY = "YOUR_ACTUAL_API_KEY_HERE"
+FIREBASE_WEB_API_KEY = "AIzaSyD1EmHInF3eYXKad9lJL_Tj2oxEdePwKSU"
 
 # ____ Page Configuration ____
 st.set_page_config(page_title="🛡️ SENTINEL COMMAND CENTER", layout="wide", initial_sidebar_state="expanded")
