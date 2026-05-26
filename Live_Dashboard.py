@@ -117,5 +117,4 @@ else:
                         elif "B8:27:EB" in mac: 
                             vendor = "🚨 Rogue IoT (Raspberry Pi)"
                             critical_threats += 1
-
-                        current_device = {"IP Address": ip, "MAC Address": mac
+current_device = {"IP Address": ip, "MAC Address": mac, "Vendor": vendor, "Vulnerabilities": []} current_device = {"IP Address": ip, "MAC Address": mac
