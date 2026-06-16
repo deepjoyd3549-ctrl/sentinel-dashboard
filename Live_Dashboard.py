@@ -93,6 +93,21 @@ else:
     # Update this URL if your specific database link is different!
     FIREBASE_URL = "https://sentinel-iot-81214-default-rtdb.firebaseio.com/SentinelReports/latest_scan.json"
 
+    # ENTERPRISE VENDOR MAPPING DICTIONARY
+    VENDOR_MAP = {
+        "00:1C:B3": "Apple",
+        "00:00:F0": "Samsung",
+        "00:1A:A1": "Cisco",
+        "B8:27:EB": "🚨 Rogue IoT (Raspberry Pi)",
+        "00:50:F2": "Microsoft",
+        "3C:5A:B4": "Google",
+        "F0:D2:F1": "Amazon",
+        "14:F6:5A": "Xiaomi",
+        "00:01:4A": "Sony",
+        "00:1B:21": "Intel",
+        "C0:EE:FB": "OnePlus"
+    }
+
     @st.cache_data(ttl=2)
     def fetch_and_parse_data():
         try:
@@ -110,13 +125,15 @@ else:
                     match = re.search(r'ACTIVE: ([\d\.]+) \[([a-fA-F0-9:]+)\]', line)
                     if match:
                         ip, mac = match.group(1), match.group(2)
+                        
+                        # Match MAC address prefix to Vendor
                         vendor = "Unknown"
-                        if "00:1C:B3" in mac: vendor = "Apple"
-                        elif "00:00:F0" in mac: vendor = "Samsung"
-                        elif "00:1A:A1" in mac: vendor = "Cisco"
-                        elif "B8:27:EB" in mac: 
-                            vendor = "🚨 Rogue IoT (Raspberry Pi)"
-                            critical_threats += 1
+                        for mac_prefix, vend_name in VENDOR_MAP.items():
+                            if mac_prefix in mac:
+                                vendor = vend_name
+                                if "Rogue IoT" in vend_name:
+                                    critical_threats += 1
+                                break
 
                         current_device = {"IP Address": ip, "MAC Address": mac, "Vendor": vendor, "Vulnerabilities": []}
                         devices.append(current_device)
@@ -168,9 +185,13 @@ else:
                 vendor_counts = df['Vendor'].value_counts().reset_index()
                 vendor_counts.columns = ['Vendor', 'Count']
                 
+                # UPDATED COLOR MAP FOR ALL 11 VENDORS
                 color_map = {
-                    "Apple": "#FF00FF", "Samsung": "#0088FF", "Cisco": "#00FF00", 
-                    "🚨 Rogue IoT (Raspberry Pi)": "#FF6600", "Unknown": "#FFFFFF"
+                    "Apple": "#A2AAAD", "Samsung": "#1428A0", "Cisco": "#00BCEB", 
+                    "🚨 Rogue IoT (Raspberry Pi)": "#E30B5C", "Microsoft": "#F35325",
+                    "Google": "#FBBC05", "Amazon": "#FF9900", "Xiaomi": "#FF6900",
+                    "Sony": "#9E9E9E", "Intel": "#0071C5", "OnePlus": "#F5010C",
+                    "Unknown": "#FFFFFF"
                 }
                 
                 fig = px.pie(vendor_counts, names='Vendor', values='Count', hole=0.65, color='Vendor', color_discrete_map=color_map)
