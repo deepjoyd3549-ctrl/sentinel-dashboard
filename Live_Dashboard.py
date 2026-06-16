@@ -3,6 +3,7 @@ import requests
 import pandas as pd
 import re
 import plotly.express as px
+from datetime import datetime
 
 # ⚠️ VERY IMPORTANT: Replace this with your actual Web API Key from Firebase!
 # KEEP THE QUOTATION MARKS! Example: "AIzaSy..."
@@ -20,7 +21,6 @@ def verify_login(email, password):
         if response.ok:
             return True
         else:
-            # DIAGNOSTIC LOG: This prints the exact reason Firebase is rejecting you
             st.error(f"SYSTEM LOG: {response.json()}") 
             return False
     except Exception as e:
@@ -64,35 +64,6 @@ else:
         </style>
         """, unsafe_allow_html=True)
 
-    # ____ SIDEBAR CONTROL PANEL ____
-    with st.sidebar:
-        st.image("https://img.icons8.com/fluency/96/000000/cyber-security.png", width=80)
-        st.markdown("## 🛡️ SENTINEL OS")
-        st.markdown("---")
-        st.markdown("**Status:** 🟢 Online")
-        st.markdown("**Uplink:** Firebase RTDB")
-        if st.button("🔄 Force Refresh Telemetry", use_container_width=True):
-            st.rerun()
-        
-        st.markdown("---")
-        # NEW LOGOUT BUTTON!
-        if st.button("🔒 LOGOUT", type="primary", use_container_width=True):
-            st.session_state.authenticated = False
-            st.rerun()
-
-    # ____ DASHBOARD HEADER ____
-    st.markdown("""
-        <div style="text-align: center; padding-bottom: 20px;">
-            <h1 style="margin-bottom: 0px;">🛡️ SENTINEL COMMAND CENTER</h1>
-            <p style="color: #888; font-size: 18px; margin-top: 5px; letter-spacing: 2px;">TACTICAL ASSET & VULNERABILITY INTELLIGENCE</p>
-        </div>
-        <hr style="border-color: #333; margin-top: 0px;">
-    """, unsafe_allow_html=True)
-
-    # --- LIVE FIREBASE CONNECTION ---
-    # Update this URL if your specific database link is different!
-    FIREBASE_URL = "https://sentinel-iot-81214-default-rtdb.firebaseio.com/SentinelReports/latest_scan.json"
-
     # ENTERPRISE VENDOR MAPPING DICTIONARY
     VENDOR_MAP = {
         "00:1C:B3": "Apple",
@@ -108,52 +79,126 @@ else:
         "C0:EE:FB": "OnePlus"
     }
 
+    # FIREBASE ARCHIVE ENDPOINTS
+    LATEST_SCAN_URL = "https://sentinel-iot-81214-default-rtdb.firebaseio.com/SentinelReports/latest_scan.json"
+    HISTORY_URL = "https://sentinel-iot-81214-default-rtdb.firebaseio.com/SentinelReports/Scan_History.json"
+
+    # ____ SIDEBAR CONTROL PANEL ____
+    with st.sidebar:
+        st.image("https://img.icons8.com/fluency/96/000000/cyber-security.png", width=80)
+        st.markdown("## 🛡️ SENTINEL OS")
+        st.markdown("---")
+        st.markdown("**Status:** 🟢 Online")
+        st.markdown("**Uplink:** Firebase RTDB")
+        
+        # NEW CONTROL: Select data mode
+        scan_mode = st.radio("SELECT TELEMETRY MODE:", ["🟢 Live Feed (Latest Scan)", "📜 Historical Archives"])
+        
+        selected_history_log = None
+        
+        if scan_mode == "📜 Historical Archives":
+            try:
+                hist_response = requests.get(HISTORY_URL)
+                hist_data = hist_response.json()
+                
+                if hist_data:
+                    # Construct a list of records sorted from newest to oldest
+                    history_options = []
+                    log_mapping = {}
+                    
+                    for push_id, record in hist_data.items():
+                        raw_ts = record.get("timestamp", "0")
+                        try:
+                            # Convert millisecond string to readable datetime
+                            formatted_time = datetime.fromtimestamp(int(raw_ts) / 1000.0).strftime('%Y-%m-%d %H:%M:%S')
+                        except:
+                            formatted_time = f"Log ID: {push_id}"
+                            
+                        history_options.append(formatted_time)
+                        log_mapping[formatted_time] = record.get("raw_log", "")
+                    
+                    # Reverse options so newest is at the top
+                    history_options.reverse()
+                    
+                    selected_time = st.selectbox("CHOOSE HISTORICAL TIMESTAMP:", history_options)
+                    if selected_time:
+                        selected_history_log = log_mapping[selected_time]
+                else:
+                    st.info("No logs saved in History database yet.")
+            except Exception as e:
+                st.error(f"Error fetching history: {e}")
+
+        st.markdown("---")
+        if st.button("🔄 Force Refresh Telemetry", use_container_width=True):
+            st.rerun()
+        
+        if st.button("🔒 LOGOUT", type="primary", use_container_width=True):
+            st.session_state.authenticated = False
+            st.rerun()
+
+    # ____ DASHBOARD HEADER ____
+    st.markdown("""
+        <div style="text-align: center; padding-bottom: 20px;">
+            <h1 style="margin-bottom: 0px;">🛡️ SENTINEL COMMAND CENTER</h1>
+            <p style="color: #888; font-size: 18px; margin-top: 5px; letter-spacing: 2px;">TACTICAL ASSET & VULNERABILITY INTELLIGENCE</p>
+        </div>
+        <hr style="border-color: #333; margin-top: 0px;">
+    """, unsafe_allow_html=True)
+
+    # --- PARSING ENGINE ---
     @st.cache_data(ttl=2)
-    def fetch_and_parse_data():
+    def parse_raw_log_text(raw_log):
+        if not raw_log: return [], 0, 0
+            
+        devices, total_open_ports, critical_threats = [], 0, 0
+        current_device = None
+
+        for line in raw_log.split('\n'):
+            line = line.strip()
+            if line.startswith('[+] ACTIVE:'):
+                match = re.search(r'ACTIVE: ([\d\.]+) \[([a-fA-F0-9:]+)\]', line)
+                if match:
+                    ip, mac = match.group(1), match.group(2)
+                    
+                    # Match MAC address prefix to Vendor
+                    vendor = "Unknown"
+                    for mac_prefix, vend_name in VENDOR_MAP.items():
+                        if mac_prefix in mac:
+                            vendor = vend_name
+                            if "Rogue IoT" in vend_name:
+                                critical_threats += 1
+                            break
+
+                    current_device = {"IP Address": ip, "MAC Address": mac, "Vendor": vendor, "Vulnerabilities": []}
+                    devices.append(current_device)
+            
+            elif line.startswith('[!]Port') and current_device is not None:
+                match = re.search(r'Port (\d+) OPEN \(([^)]+)\)', line)
+                if match:
+                    port, service = match.group(1), match.group(2)
+                    current_device["Vulnerabilities"].append(f"{port}/{service}")
+                    total_open_ports += 1
+
+        for d in devices:
+            d["Vulnerabilities"] = " | ".join(d["Vulnerabilities"]) if d["Vulnerabilities"] else "Secure"
+
+        return devices, total_open_ports, critical_threats
+
+    # Fetch data based on the chosen mode
+    raw_log = ""
+    if scan_mode == "🟢 Live Feed (Latest Scan)":
         try:
-            response = requests.get(FIREBASE_URL)
+            response = requests.get(LATEST_SCAN_URL)
             data = response.json()
-            if not data: return None, [], 0, 0
-                
-            raw_log = data.get("raw_log", "")
-            devices, total_open_ports, critical_threats = [], 0, 0
-            current_device = None
-
-            for line in raw_log.split('\n'):
-                line = line.strip()
-                if line.startswith('[+] ACTIVE:'):
-                    match = re.search(r'ACTIVE: ([\d\.]+) \[([a-fA-F0-9:]+)\]', line)
-                    if match:
-                        ip, mac = match.group(1), match.group(2)
-                        
-                        # Match MAC address prefix to Vendor
-                        vendor = "Unknown"
-                        for mac_prefix, vend_name in VENDOR_MAP.items():
-                            if mac_prefix in mac:
-                                vendor = vend_name
-                                if "Rogue IoT" in vend_name:
-                                    critical_threats += 1
-                                break
-
-                        current_device = {"IP Address": ip, "MAC Address": mac, "Vendor": vendor, "Vulnerabilities": []}
-                        devices.append(current_device)
-                
-                elif line.startswith('[!]Port') and current_device is not None:
-                    match = re.search(r'Port (\d+) OPEN \(([^)]+)\)', line)
-                    if match:
-                        port, service = match.group(1), match.group(2)
-                        current_device["Vulnerabilities"].append(f"{port}/{service}")
-                        total_open_ports += 1
-
-            for d in devices:
-                d["Vulnerabilities"] = " | ".join(d["Vulnerabilities"]) if d["Vulnerabilities"] else "Secure"
-
-            return raw_log, devices, total_open_ports, critical_threats
+            if data:
+                raw_log = data.get("raw_log", "")
         except Exception as e:
-            return None, [], 0, 0
+            st.error(f"Error fetching live data: {e}")
+    else:
+        raw_log = selected_history_log if selected_history_log else ""
 
-    # ____ DATA PROCESSING ____
-    raw_log, devices, total_ports, critical_threats = fetch_and_parse_data()
+    # Process Data through parsing engine
+    devices, total_ports, critical_threats = parse_raw_log_text(raw_log)
 
     def highlight_threats(row):
         if "🚨 Rogue IoT" in row['Vendor']:
@@ -163,6 +208,10 @@ else:
         return [''] * len(row)
 
     if raw_log:
+        # Show what time block we are currently viewing
+        if scan_mode == "📜 Historical Archives":
+            st.info(f"💾 VIEWING ARCHIVED RECORD: {selected_time}")
+
         # ____ TOP ROW: KPI METRICS ____
         col1, col2, col3 = st.columns(3)
         with col1: st.metric(label="Total Active Assets", value=len(devices))
@@ -185,7 +234,6 @@ else:
                 vendor_counts = df['Vendor'].value_counts().reset_index()
                 vendor_counts.columns = ['Vendor', 'Count']
                 
-                # UPDATED COLOR MAP FOR ALL 11 VENDORS
                 color_map = {
                     "Apple": "#A2AAAD", "Samsung": "#1428A0", "Cisco": "#00BCEB", 
                     "🚨 Rogue IoT (Raspberry Pi)": "#E30B5C", "Microsoft": "#F35325",
@@ -235,4 +283,4 @@ else:
             st.code(raw_log, language="bash")
 
     else:
-        st.warning("Awaiting first transmission from Field Agent...")
+        st.warning("Awaiting transmission or no records available for this selected mode.")
